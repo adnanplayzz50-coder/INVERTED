@@ -26,7 +26,16 @@ export async function POST(request: NextRequest) {
     const tree = await gh(token, "/repos/" + owner + "/" + name + "/git/trees/" + baseSha + "?recursive=1");
     const paths = (tree.tree || []).filter((x: any) => x.type === "blob").map((x: any) => x.path as string);
     const hints = instruction.match(/[\w./@-]+\.[A-Za-z0-9]+/g) || [];
-    const contextPaths = paths.filter((p: string) => hints.some((h: string) => p === h || p.endsWith(h))).slice(0, 8);
+    const keywords = instruction.toLowerCase().split(/[^a-z0-9]+/).filter((word: string) => word.length > 3);
+    const scoredPaths = paths.map((path: string) => {
+      const lower = path.toLowerCase();
+      let score = hints.some((hint: string) => lower === hint.toLowerCase() || lower.endsWith("/" + hint.toLowerCase())) ? 100 : 0;
+      for (const word of keywords) if (lower.includes(word)) score += 4;
+      if (lower.startsWith("src/") && /\.(tsx?|jsx?|css|json)$/.test(lower)) score += 2;
+      if (/(page|layout|route|index|app)\.(tsx?|jsx?)$/.test(lower)) score += 1;
+      return { path, score };
+    }).filter((item: any) => item.score > 0).sort((a: any, b: any) => b.score - a.score);
+    const contextPaths = scoredPaths.slice(0, 10).map((item: any) => item.path);
     const contextFiles: any[] = [];
     let total = 0;
     for (const path of contextPaths) {
