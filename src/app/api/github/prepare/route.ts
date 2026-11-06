@@ -51,7 +51,19 @@ export async function POST(request: NextRequest) {
     if (!key || !endpoint || !model) return NextResponse.json({ error: "Set AI_API_KEY, AI_API_URL and AI_MODEL in Vercel." }, { status: 503 });
     const system = "You are INVERTED, an expert software engineer editing a real GitHub repository. Return ONLY valid JSON: {\"summary\":\"...\",\"changes\":[{\"path\":\"relative/path\",\"content\":\"COMPLETE final file contents\",\"reason\":\"...\"}]}. Produce complete file contents, never patches or placeholders. Use uploaded files as source material and obey requested destination paths. For edits, preserve existing behavior and integrate changes. Only include files that should change. No markdown fences. Paths must be relative, must not start with slash, contain .. or target .git. If upload destination is unspecified, use its filename at repository root and mention that.";
     const payload = { repository: repo, branch, repositoryFilePaths: paths.slice(0, 500), existingFileContents: contextFiles, uploadedFiles: files, instruction: instruction.trim() };
-    const aiEndpoint = endpoint.trim().replace(/\\/+$/, "").replace(/\\/v1beta\\/openai$/i, "/v1beta/openai/chat/completions");
+    const configuredUrl = endpoint.trim().replace(/\/+$/, "");
+    const parsedUrl = new URL(configuredUrl);
+    if (parsedUrl.hostname !== "generativelanguage.googleapis.com" || parsedUrl.protocol !== "https:") {
+      return NextResponse.json({ error: "For Gemini, AI_API_URL must use https://generativelanguage.googleapis.com. Current host: " + parsedUrl.hostname }, { status: 400 });
+    }
+    const apiPath = parsedUrl.pathname.replace(/\/+$/, "");
+    const aiEndpoint = apiPath.endsWith("/v1beta/openai/chat/completions")
+      ? parsedUrl.origin + apiPath
+      : apiPath.endsWith("/v1beta/openai")
+        ? parsedUrl.origin + apiPath + "/chat/completions"
+        : apiPath.endsWith("/v1beta")
+          ? parsedUrl.origin + apiPath + "/openai/chat/completions"
+          : parsedUrl.origin + "/v1beta/openai/chat/completions";
     const response = await fetch(aiEndpoint, { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ model, temperature: 0.15, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(payload) }] }), cache: "no-store" });
     const rawBody = await response.text();
     let result: any = {};
