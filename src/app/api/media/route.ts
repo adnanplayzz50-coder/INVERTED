@@ -25,23 +25,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const form = await request.formData();
-    const file = form.get("file");
-    const folder = form.get("folder") === "music" ? "music" : "videos";
-    if (!(file instanceof File)) return NextResponse.json({ error: "Choose a file to upload." }, { status: 400 });
-    const maxSize = folder === "music" ? 25 * 1024 * 1024 : 100 * 1024 * 1024;
-    if (file.size <= 0 || file.size > maxSize) return NextResponse.json({ error: "File exceeds the " + (folder === "music" ? "25 MB" : "100 MB") + " upload limit." }, { status: 413 });
-    const valid = folder === "music" ? /^(audio\/(mpeg|mp4|wav|ogg|aac|flac|webm)|application\/octet-stream)$/.test(file.type) : /^(video\/(mp4|webm|quicktime|ogg|x-matroska)|application\/octet-stream)$/.test(file.type);
+    const body = await request.json() as { name?: string; folder?: string; contentType?: string };
+    const folder = body.folder === "music" ? "music" : "videos";
+    if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 180) return NextResponse.json({ error: "A valid file name is required." }, { status: 400 });
+    const contentType = typeof body.contentType === "string" ? body.contentType : "";
+    const valid = folder === "music" ? /^(audio\/(mpeg|mp4|wav|ogg|aac|flac|webm)|application\/octet-stream)$/.test(contentType) : /^(video\/(mp4|webm|quicktime|ogg|x-matroska)|application\/octet-stream)$/.test(contentType);
     if (!valid) return NextResponse.json({ error: folder === "music" ? "Choose an audio file (MP3, M4A, WAV, OGG or FLAC)." : "Choose a video file (MP4, WebM, MOV or OGG)." }, { status: 415 });
-    const path = folder + "/" + Date.now() + "-" + crypto.randomUUID().slice(0, 8) + "-" + safeName(file.name);
-    const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase.storage.from(BUCKET).upload(path, await file.arrayBuffer(), { contentType: file.type || (folder === "music" ? "audio/mpeg" : "video/mp4"), cacheControl: "3600", upsert: false });
+    const path = folder + "/" + Date.now() + "-" + crypto.randomUUID().slice(0, 8) + "-" + safeName(body.name);
+    const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUploadUrl(path);
     if (error) throw error;
-    const { data: signed, error: signedError } = await supabase.storage.from(BUCKET).createSignedUrl(data.path, 3600);
-    if (signedError) throw signedError;
-    return NextResponse.json({ ok: true, item: { name: file.name, path: data.path, size: file.size, mimeType: file.type, url: signed.signedUrl } });
+    const baseUrl = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
+    return NextResponse.json({ path, token: data.token, uploadUrl: baseUrl + "/storage/v1" + data.signedUrl, contentType });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to upload media." }, { status: 503 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to prepare media upload." }, { status: 503 });
   }
 }
 
