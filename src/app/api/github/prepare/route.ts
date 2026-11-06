@@ -51,9 +51,12 @@ export async function POST(request: NextRequest) {
     if (!key || !endpoint || !model) return NextResponse.json({ error: "Set AI_API_KEY, AI_API_URL and AI_MODEL in Vercel." }, { status: 503 });
     const system = "You are INVERTED, an expert software engineer editing a real GitHub repository. Return ONLY valid JSON: {\"summary\":\"...\",\"changes\":[{\"path\":\"relative/path\",\"content\":\"COMPLETE final file contents\",\"reason\":\"...\"}]}. Produce complete file contents, never patches or placeholders. Use uploaded files as source material and obey requested destination paths. For edits, preserve existing behavior and integrate changes. Only include files that should change. No markdown fences. Paths must be relative, must not start with slash, contain .. or target .git. If upload destination is unspecified, use its filename at repository root and mention that.";
     const payload = { repository: repo, branch, repositoryFilePaths: paths.slice(0, 500), existingFileContents: contextFiles, uploadedFiles: files, instruction: instruction.trim() };
-    const response = await fetch(endpoint, { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ model, temperature: 0.15, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(payload) }] }), cache: "no-store" });
-    const result = await response.json();
-    if (!response.ok) return NextResponse.json({ error: result.error?.message || result.message || "AI provider request failed: " + response.status }, { status: 502 });
+    const aiEndpoint = endpoint.trim().replace(/\\/+$/, "").replace(/\\/v1beta\\/openai$/i, "/v1beta/openai/chat/completions");
+    const response = await fetch(aiEndpoint, { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ model, temperature: 0.15, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(payload) }] }), cache: "no-store" });
+    const rawBody = await response.text();
+    let result: any = {};
+    try { result = rawBody ? JSON.parse(rawBody) : {}; } catch { result = {}; }
+    if (!response.ok) return NextResponse.json({ error: "Gemini returned HTTP " + response.status + " from " + new URL(aiEndpoint).host + ": " + (result.error?.message || result.message || rawBody.slice(0, 500) || "No error details returned.") + (response.status === 404 ? " Check AI_API_URL and AI_MODEL in Vercel." : "") }, { status: 502 });
     const raw = result.choices?.[0]?.message?.content;
     if (typeof raw !== "string") return NextResponse.json({ error: "AI returned an unexpected response. Check AI_API_URL and AI_MODEL." }, { status: 502 });
     const parsed = JSON.parse(raw);
