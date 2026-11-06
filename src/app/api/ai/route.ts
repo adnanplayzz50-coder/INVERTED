@@ -24,13 +24,29 @@ export async function POST(request: NextRequest) {
         : apiPath.endsWith("/v1beta")
           ? parsedUrl.origin + apiPath + "/openai/chat/completions"
           : parsedUrl.origin + "/v1beta/openai/chat/completions";
-    const response = await fetch(endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_API_KEY}` },
-      body: JSON.stringify({ model: AI_MODEL, messages: [
-        { role: "system", content: "You are the coding assistant inside INVERTED. Focus on understanding supplied project files, planning precise code changes, and explaining destination paths. Never claim a change was committed. Return actionable code and file paths." },
-        { role: "user", content: `Request:\n${prompt}\n\nProject files:\n${context.map(file => `--- ${file.path} ---\n${file.content}`).join("\n\n")}` }
-      ] })
-    });
+    const requestBody = JSON.stringify({ model: AI_MODEL, messages: [
+      { role: "system", content: "You are the coding assistant inside INVERTED. Focus on understanding supplied project files, planning precise code changes, and explaining destination paths. Never claim a change was committed. Return actionable code and file paths." },
+      { role: "user", content: `Request:\n${prompt}\n\nProject files:\n${context.map(file => `--- ${file.path} ---\n${file.content}`).join("\n\n")}` }
+    ] });
+    let response: Response | undefined;
+    // Gemini can briefly return 503/429 during demand spikes. Retry transient failures.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_API_KEY}` },
+        body: requestBody,
+        cache: "no-store"
+      });
+      if (response.ok || (response.status !== 503 && response.status !== 429 && response.status !== 502)) break;
+      if (attempt < 2) {
+        const retryAfter = Number(response.headers.get("retry-after"));
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 4000)
+          : 800 * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    if (!response) throw new Error("Gemini did not return a response.");
     const rawBody = await response.text();
     let data: any = {};
     try { data = rawBody ? JSON.parse(rawBody) : {}; } catch { data = {}; }
