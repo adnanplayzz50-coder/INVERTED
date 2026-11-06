@@ -104,10 +104,14 @@ export default function Dashboard() {
   async function uploadMedia(file: File, folder: "videos" | "music") {
     setMediaUploading(true); setMediaError("");
     try {
-      const form = new FormData(); form.append("file", file); form.append("folder", folder);
-      const response = await fetch("/api/media", { method: "POST", body: form });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Upload failed.");
+      const prepared = await fetch("/api/media", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, folder, contentType: file.type || (folder === "music" ? "audio/mpeg" : "video/mp4") }) });
+      const target = await prepared.json();
+      if (!prepared.ok) throw new Error(target.error || "Could not prepare the upload.");
+      const uploaded = await fetch(target.uploadUrl, { method: "PUT", headers: { "Content-Type": target.contentType || file.type || "application/octet-stream", "x-upsert": "false" }, body: file });
+      if (!uploaded.ok) {
+        const detail = await uploaded.text();
+        throw new Error("Supabase upload failed (" + uploaded.status + "): " + detail.slice(0, 240));
+      }
       await loadMedia(folder);
     } catch (error) { setMediaError(error instanceof Error ? error.message : "Upload failed."); }
     finally { setMediaUploading(false); }
