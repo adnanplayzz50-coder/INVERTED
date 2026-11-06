@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AudioLines, Clapperboard, Code2, FolderGit2, Settings, Search, LogOut, Plus, Upload, Github, Sparkles, HardDrive, Moon, Sun, Menu, X, ArrowUpRight, Music2, Play, FileCode2, ShieldCheck } from "lucide-react";
 
 type Section = "Home"|"Video Viewer"|"Music Library"|"AI GitHub Workspace"|"Settings";
+type IntegrationStatus = { status: "configured" | "incomplete" | "checking" | "error"; message: string; missing?: string[] }; 
+type ConfigurationStatus = { github: IntegrationStatus; supabase: IntegrationStatus; ai: IntegrationStatus; security: IntegrationStatus };
 const nav: {name:Section;icon:typeof Clapperboard;desc:string}[] = [
   {name:"Home",icon:FolderGit2,desc:"Your overview"},
   {name:"Video Viewer",icon:Clapperboard,desc:"Your video collection"},
@@ -17,7 +19,27 @@ export default function Dashboard() {
   const [mobile,setMobile] = useState(false);
   const [light,setLight] = useState(false);
   const [query,setQuery] = useState("");
+  const [configuration,setConfiguration] = useState<ConfigurationStatus | null>(null);
+  const [configurationLoading,setConfigurationLoading] = useState(false);
   const router=useRouter();
+  useEffect(() => {
+    if (section !== "Settings") return;
+    let active = true;
+    setConfigurationLoading(true);
+    fetch("/api/configuration", { cache: "no-store" })
+      .then(async response => {
+        if (!response.ok) throw new Error("Could not check configuration. Refresh and try again.");
+        return response.json() as Promise<ConfigurationStatus>;
+      })
+      .then(data => { if (active) setConfiguration(data); })
+      .catch(error => {
+        if (!active) return;
+        const failed = { status: "error" as const, message: error instanceof Error ? error.message : "Configuration check failed." };
+        setConfiguration({ github: failed, supabase: failed, ai: failed, security: failed });
+      })
+      .finally(() => { if (active) setConfigurationLoading(false); });
+    return () => { active = false; };
+  }, [section]);
   async function logout(){await fetch("/api/logout",{method:"POST"});router.replace("/login");router.refresh();}
   const cards = [
     {name:"Video Viewer" as Section,desc:"Upload, organize and watch your videos from anywhere.",icon:Clapperboard,tag:"MEDIA"},
@@ -48,11 +70,15 @@ export default function Dashboard() {
           {section==="Video Viewer"&&<Module title="Video Viewer" subtitle="A home for your videos, wherever you are." icon={<Clapperboard size={22}/>}><div className="surface p-6 text-center"><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-red-500/10 text-red-400"><Upload size={24}/></div><h3 className="font-semibold">Cloud video library is being connected</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-zinc-500">Persistent uploads require your Supabase project and private storage bucket. This module will not pretend files are saved until cloud storage is configured.</p><button onClick={()=>setSection("Settings")} className="btn-ghost mt-5">View setup settings</button></div></Module>}
           {section==="Music Library"&&<Module title="Music Library" subtitle="Your tracks, playlists and listening queue." icon={<Music2 size={22}/>}><div className="surface p-6 text-center"><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-red-500/10 text-red-400"><AudioLines size={24}/></div><h3 className="font-semibold">Your library is ready for storage setup</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-zinc-500">Connect Supabase Storage to keep songs available across sessions and devices.</p><button onClick={()=>setSection("Settings")} className="btn-ghost mt-5">View setup settings</button></div></Module>}
           {section==="AI GitHub Workspace"&&<Module title="AI GitHub Workspace" subtitle="Upload files, specify their destination, and work against a real GitHub repository." icon={<Code2 size={22}/>}><div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><div className="surface min-h-[430px] p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Github size={17}/> Repository context</div><span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[10px] text-amber-300">NOT CONNECTED</span></div><label className="mb-2 block text-xs text-zinc-500">Repository (owner/name)</label><input className="field" placeholder="your-account/your-repository"/><label className="mb-2 mt-4 block text-xs text-zinc-500">Branch</label><input className="field" placeholder="main" defaultValue="main"/><div className="mt-5 rounded-xl border border-dashed border-white/15 p-6 text-center"><Upload className="mx-auto mb-2 text-zinc-500"/><div className="text-sm font-medium">Drop files here or choose files</div><p className="mt-1 text-xs text-zinc-500">Source files will be mapped to the paths you specify.</p><input type="file" multiple className="mt-4 block w-full text-xs text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-white"/></div><button className="btn-primary mt-5 w-full" onClick={()=>setSection("Settings")}>Configure GitHub connection</button></div><div className="surface flex min-h-[430px] flex-col p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Sparkles size={17} className="text-red-400"/> AI instructions</div><span className="text-[10px] text-zinc-500">WORKSPACE</span></div><div className="flex-1 rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-6 text-zinc-500">Your uploaded files, repository structure, and requested edits will appear here. The AI integration is inactive until an AI provider and GitHub OAuth credentials are configured.</div><textarea value={query} onChange={e=>setQuery(e.target.value)} className="field mt-4 min-h-24 resize-y" placeholder="Example: Update ChatView.tsx and place it at src/components/chat/ChatView.tsx…"/><button disabled={!query.trim()} className="btn-primary mt-3 inline-flex items-center justify-center gap-2 disabled:opacity-40"><Sparkles size={16}/> Prepare changes</button></div></div></Module>}
-          {section==="Settings"&&<Module title="Settings" subtitle="Manage connections and workspace preferences." icon={<Settings size={22}/>}><div className="grid gap-4 lg:grid-cols-2"><Setting title="GitHub OAuth" detail="Connect your GitHub account to select repositories, read files and prepare commits." action="GitHub credentials required"/><Setting title="Supabase storage" detail="Configure a private inverted-media bucket for persistent videos and music." action="Supabase credentials required"/><Setting title="AI provider" detail="Set your server-side AI API endpoint, key and model." action="AI provider not configured"/><Setting title="Security" detail="The password gate uses a signed, HTTP-only session cookie. Set a long random AUTH_SECRET." action="Session protection enabled"/></div><div className="surface mt-4 p-5"><h3 className="font-semibold">Environment variables</h3><p className="mt-2 text-sm leading-6 text-zinc-500">Add the values from <code className="text-red-300">.env.example</code> to your Vercel project settings. Keep service-role keys, OAuth secrets, AI keys, and the site password server-side only.</p><button onClick={()=>navigator.clipboard?.writeText("SITE_PASSWORD=\nAUTH_SECRET=\nSUPABASE_URL=\nSUPABASE_ANON_KEY=\nSUPABASE_SERVICE_ROLE_KEY=\nGITHUB_CLIENT_ID=\nGITHUB_CLIENT_SECRET=\nAI_API_KEY=\nAI_API_URL=\nAI_MODEL=")} className="btn-ghost mt-4">Copy variable names</button></div></Module>}
+          {section==="Settings"&&<Module title="Settings" subtitle="Manage connections and workspace preferences." icon={<Settings size={22}/>}><div className="grid gap-4 lg:grid-cols-2"><Setting title="GitHub OAuth" detail="Connect your GitHub account to select repositories, read files and prepare commits." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.github ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="Supabase storage" detail="Private inverted-media bucket for persistent videos and music." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.supabase ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="AI provider" detail="Server-side AI API endpoint, key and model." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.ai ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="Security" detail="Signed, HTTP-only session cookie protection." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.security ?? {status:"checking",message:"Waiting for configuration check…"}}/></div><div className="mt-4 flex items-center justify-between"><p className="text-xs text-zinc-500">Only configuration status is shown. Secret values stay on the server.</p><button onClick={() => setSection("Home") || setSection("Settings")} className="btn-ghost text-xs">Refresh status</button></div><div className="surface mt-4 p-5"><h3 className="font-semibold">Environment variables</h3><p className="mt-2 text-sm leading-6 text-zinc-500">Add the values from <code className="text-red-300">.env.example</code> to your Vercel project settings. Keep service-role keys, OAuth secrets, AI keys, and the site password server-side only.</p><button onClick={()=>navigator.clipboard?.writeText("SITE_PASSWORD=\nAUTH_SECRET=\nSUPABASE_URL=\nSUPABASE_ANON_KEY=\nSUPABASE_SERVICE_ROLE_KEY=\nGITHUB_CLIENT_ID=\nGITHUB_CLIENT_SECRET=\nAI_API_KEY=\nAI_API_URL=\nAI_MODEL=")} className="btn-ghost mt-4">Copy variable names</button></div></Module>}
         </div>
       </main>
     </div>
   </div>;
 }
 function Module({title,subtitle,icon,children}:{title:string;subtitle:string;icon:React.ReactNode;children:React.ReactNode}) { return <div className="fade-in"><div className="mb-6 flex items-center gap-3"><div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-red-400">{icon}</div><div><h1 className="text-2xl font-bold">{title}</h1><p className="mt-1 text-sm text-zinc-500">{subtitle}</p></div></div>{children}</div>; }
-function Setting({title,detail,action}:{title:string;detail:string;action:string}) { return <div className="surface p-5"><div className="font-semibold">{title}</div><p className="mt-2 text-sm leading-6 text-zinc-500">{detail}</p><div className="mt-4 text-xs font-medium text-amber-300">{action}</div></div>; }
+function Setting({title,detail,status}:{title:string;detail:string;status:IntegrationStatus}) {
+  const tone = status.status === "configured" ? "text-emerald-400" : status.status === "checking" ? "text-zinc-400" : status.status === "error" ? "text-red-400" : "text-amber-300";
+  const label = status.status === "configured" ? "Configured" : status.status === "checking" ? "Checking…" : status.status === "error" ? "Check failed" : "Needs attention";
+  return <div className="surface p-5"><div className="flex items-center justify-between gap-3"><div className="font-semibold">{title}</div><span className={`text-xs font-semibold ${tone}`}>{label}</span></div><p className="mt-2 text-sm leading-6 text-zinc-500">{detail}</p><div className={`mt-4 text-xs font-medium ${tone}`}>{status.message}</div>{status.missing?.length ? <div className="mt-2 text-xs text-zinc-500">Missing: {status.missing.join(", ")}</div> : null}</div>;
+}
