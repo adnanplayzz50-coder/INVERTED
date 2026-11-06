@@ -11,7 +11,19 @@ export async function POST(request: NextRequest) {
     const { prompt, context = [] } = parsed.data;
     const { AI_API_KEY, AI_API_URL, AI_MODEL } = process.env;
     if (!AI_API_KEY || !AI_API_URL || !AI_MODEL) return NextResponse.json({ error: "Configure AI_API_KEY, AI_API_URL and AI_MODEL in Vercel settings." }, { status: 503 });
-    const endpoint = AI_API_URL.trim().replace(/\\/+$/, "").replace(/\\/v1beta\\/openai$/i, "/v1beta/openai/chat/completions");
+    const configuredUrl = AI_API_URL.trim().replace(/\/+$/, "");
+    const parsedUrl = new URL(configuredUrl);
+    if (parsedUrl.hostname !== "generativelanguage.googleapis.com" || parsedUrl.protocol !== "https:") {
+      return NextResponse.json({ error: "For Gemini, AI_API_URL must use https://generativelanguage.googleapis.com. Current host: " + parsedUrl.hostname }, { status: 400 });
+    }
+    const apiPath = parsedUrl.pathname.replace(/\/+$/, "");
+    const endpoint = apiPath.endsWith("/v1beta/openai/chat/completions")
+      ? parsedUrl.origin + apiPath
+      : apiPath.endsWith("/v1beta/openai")
+        ? parsedUrl.origin + apiPath + "/chat/completions"
+        : apiPath.endsWith("/v1beta")
+          ? parsedUrl.origin + apiPath + "/openai/chat/completions"
+          : parsedUrl.origin + "/v1beta/openai/chat/completions";
     const response = await fetch(endpoint, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_API_KEY}` },
       body: JSON.stringify({ model: AI_MODEL, messages: [
