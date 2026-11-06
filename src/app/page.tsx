@@ -7,6 +7,8 @@ import { AudioLines, Clapperboard, Code2, FolderGit2, Settings, Search, LogOut, 
 type Section = "Home"|"Video Viewer"|"Music Library"|"AI GitHub Workspace"|"Settings";
 type IntegrationStatus = { status: "configured" | "incomplete" | "checking" | "error"; message: string; missing?: string[] }; 
 type ConfigurationStatus = { github: IntegrationStatus; supabase: IntegrationStatus; ai: IntegrationStatus; security: IntegrationStatus };
+type GitHubRepo = { fullName: string; defaultBranch: string; private: boolean; url: string };
+type GitHubAccount = { login: string; avatarUrl: string };
 const nav: {name:Section;icon:typeof Clapperboard;desc:string}[] = [
   {name:"Home",icon:FolderGit2,desc:"Your overview"},
   {name:"Video Viewer",icon:Clapperboard,desc:"Your video collection"},
@@ -22,6 +24,11 @@ export default function Dashboard() {
   const [configuration,setConfiguration] = useState<ConfigurationStatus | null>(null);
   const [configurationLoading,setConfigurationLoading] = useState(false);
   const [configurationRefresh,setConfigurationRefresh] = useState(0);
+  const [githubAccount,setGithubAccount] = useState<GitHubAccount | null>(null);
+  const [githubRepos,setGithubRepos] = useState<GitHubRepo[]>([]);
+  const [selectedRepo,setSelectedRepo] = useState("");
+  const [githubLoading,setGithubLoading] = useState(false);
+  const [githubError,setGithubError] = useState("");
   const router=useRouter();
   useEffect(() => {
     if (section !== "Settings") return;
@@ -41,6 +48,36 @@ export default function Dashboard() {
       .finally(() => { if (active) setConfigurationLoading(false); });
     return () => { active = false; };
   }, [section, configurationRefresh]);
+  useEffect(() => {
+    if (section !== "AI GitHub Workspace") return;
+    let active = true;
+    setGithubLoading(true);
+    setGithubError("");
+    fetch("/api/github/me", { cache: "no-store" })
+      .then(async response => {
+        if (response.status === 401) return null;
+        if (!response.ok) throw new Error("Could not verify the GitHub connection.");
+        return response.json();
+      })
+      .then(async account => {
+        if (!active) return;
+        if (!account) { setGithubAccount(null); setGithubRepos([]); return; }
+        setGithubAccount(account.user);
+        const response = await fetch("/api/github/repos", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load repositories.");
+        if (!active) return;
+        setGithubRepos(data.repos || []);
+        setSelectedRepo(current => current || data.repos?.[0]?.fullName || "");
+      })
+      .catch(error => { if (active) setGithubError(error instanceof Error ? error.message : "GitHub connection check failed."); })
+      .finally(() => { if (active) setGithubLoading(false); });
+    return () => { active = false; };
+  }, [section]);
+  async function disconnectGitHub() {
+    await fetch("/api/github/disconnect", { method: "POST" });
+    setGithubAccount(null); setGithubRepos([]); setSelectedRepo(""); setGithubError("");
+  }
   async function logout(){await fetch("/api/logout",{method:"POST"});router.replace("/login");router.refresh();}
   const cards = [
     {name:"Video Viewer" as Section,desc:"Upload, organize and watch your videos from anywhere.",icon:Clapperboard,tag:"MEDIA"},
@@ -70,7 +107,7 @@ export default function Dashboard() {
           </div>}
           {section==="Video Viewer"&&<Module title="Video Viewer" subtitle="A home for your videos, wherever you are." icon={<Clapperboard size={22}/>}><div className="surface p-6 text-center"><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-red-500/10 text-red-400"><Upload size={24}/></div><h3 className="font-semibold">Cloud video library is being connected</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-zinc-500">Persistent uploads require your Supabase project and private storage bucket. This module will not pretend files are saved until cloud storage is configured.</p><button onClick={()=>setSection("Settings")} className="btn-ghost mt-5">View setup settings</button></div></Module>}
           {section==="Music Library"&&<Module title="Music Library" subtitle="Your tracks, playlists and listening queue." icon={<Music2 size={22}/>}><div className="surface p-6 text-center"><div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-red-500/10 text-red-400"><AudioLines size={24}/></div><h3 className="font-semibold">Your library is ready for storage setup</h3><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-zinc-500">Connect Supabase Storage to keep songs available across sessions and devices.</p><button onClick={()=>setSection("Settings")} className="btn-ghost mt-5">View setup settings</button></div></Module>}
-          {section==="AI GitHub Workspace"&&<Module title="AI GitHub Workspace" subtitle="Upload files, specify their destination, and work against a real GitHub repository." icon={<Code2 size={22}/>}><div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><div className="surface min-h-[430px] p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Github size={17}/> Repository context</div><span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-[10px] text-amber-300">NOT CONNECTED</span></div><label className="mb-2 block text-xs text-zinc-500">Repository (owner/name)</label><input className="field" placeholder="your-account/your-repository"/><label className="mb-2 mt-4 block text-xs text-zinc-500">Branch</label><input className="field" placeholder="main" defaultValue="main"/><div className="mt-5 rounded-xl border border-dashed border-white/15 p-6 text-center"><Upload className="mx-auto mb-2 text-zinc-500"/><div className="text-sm font-medium">Drop files here or choose files</div><p className="mt-1 text-xs text-zinc-500">Source files will be mapped to the paths you specify.</p><input type="file" multiple className="mt-4 block w-full text-xs text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-white"/></div><button className="btn-primary mt-5 w-full" onClick={()=>setSection("Settings")}>Configure GitHub connection</button></div><div className="surface flex min-h-[430px] flex-col p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Sparkles size={17} className="text-red-400"/> AI instructions</div><span className="text-[10px] text-zinc-500">WORKSPACE</span></div><div className="flex-1 rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-6 text-zinc-500">Your uploaded files, repository structure, and requested edits will appear here. The AI integration is inactive until an AI provider and GitHub OAuth credentials are configured.</div><textarea value={query} onChange={e=>setQuery(e.target.value)} className="field mt-4 min-h-24 resize-y" placeholder="Example: Update ChatView.tsx and place it at src/components/chat/ChatView.tsx…"/><button disabled={!query.trim()} className="btn-primary mt-3 inline-flex items-center justify-center gap-2 disabled:opacity-40"><Sparkles size={16}/> Prepare changes</button></div></div></Module>}
+          {section==="AI GitHub Workspace"&&<Module title="AI GitHub Workspace" subtitle="Connect GitHub and choose a repository to work with." icon={<Code2 size={22}/>}><div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"><div className="surface min-h-[430px] p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Github size={17}/> Repository context</div><span className={`rounded-full px-2.5 py-1 text-[10px] ${githubAccount ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300"}`}>{githubLoading ? "CHECKING…" : githubAccount ? "CONNECTED" : "NOT CONNECTED"}</span></div>{githubAccount ? <><div className="mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[.03] p-3"><img src={githubAccount.avatarUrl} alt="" className="h-9 w-9 rounded-full"/><div className="min-w-0 flex-1"><div className="text-sm font-semibold">@{githubAccount.login}</div><div className="text-xs text-zinc-500">GitHub account connected</div></div><button onClick={disconnectGitHub} className="text-xs text-zinc-400 hover:text-red-400">Disconnect</button></div><label className="mb-2 block text-xs text-zinc-500">Select repository</label><select className="field" value={selectedRepo} onChange={e=>setSelectedRepo(e.target.value)}><option value="">Choose a repository</option>{githubRepos.map(repo=><option key={repo.fullName} value={repo.fullName}>{repo.fullName}{repo.private ? " · Private" : ""}</option>)}</select><p className="mt-2 text-xs text-zinc-500">{githubRepos.length} repositories available to this OAuth app.</p><label className="mb-2 mt-4 block text-xs text-zinc-500">Default branch</label><input className="field" readOnly value={githubRepos.find(repo=>repo.fullName===selectedRepo)?.defaultBranch || ""} placeholder="Select a repository first"/><a href={githubRepos.find(repo=>repo.fullName===selectedRepo)?.url || "https://github.com"} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-xs text-red-300 hover:text-red-200">Open repository on GitHub ↗</a></> : <><p className="mb-4 text-sm leading-6 text-zinc-400">Authorize INVERTED with GitHub to list the repositories your account can access. GitHub access is stored in an encrypted, HTTP-only cookie.</p><a href="/api/github/connect" className="btn-primary flex w-full items-center justify-center gap-2"><Github size={17}/> Connect GitHub</a></>}{githubError ? <p role="alert" className="mt-3 text-xs text-red-400">{githubError}</p> : null}</div><div className="surface flex min-h-[430px] flex-col p-5"><div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><Sparkles size={17} className="text-red-400"/> AI instructions</div><span className="text-[10px] text-zinc-500">WORKSPACE</span></div><div className="flex-1 rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-6 text-zinc-500">{selectedRepo ? `Selected repository: ${selectedRepo}. File editing and AI change preparation will be enabled in the next workspace step.` : "Connect GitHub and select a repository to establish repository context."}</div><textarea value={query} onChange={e=>setQuery(e.target.value)} className="field mt-4 min-h-24 resize-y" placeholder="Describe the changes you want to make…"/><button disabled={!query.trim() || !selectedRepo} className="btn-primary mt-3 inline-flex items-center justify-center gap-2 disabled:opacity-40"><Sparkles size={16}/> Prepare changes</button><p className="mt-2 text-xs text-zinc-500">Change preparation is not active yet; no files will be modified by this button.</p></div></div></Module>}
           {section==="Settings"&&<Module title="Settings" subtitle="Manage connections and workspace preferences." icon={<Settings size={22}/>}><div className="grid gap-4 lg:grid-cols-2"><Setting title="GitHub OAuth" detail="Connect your GitHub account to select repositories, read files and prepare commits." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.github ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="Supabase storage" detail="Private inverted-media bucket for persistent videos and music." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.supabase ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="AI provider" detail="Server-side AI API endpoint, key and model." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.ai ?? {status:"checking",message:"Waiting for configuration check…"}}/><Setting title="Security" detail="Signed, HTTP-only session cookie protection." status={configurationLoading ? {status:"checking",message:"Checking server configuration…"} : configuration?.security ?? {status:"checking",message:"Waiting for configuration check…"}}/></div><div className="mt-4 flex items-center justify-between"><p className="text-xs text-zinc-500">Only configuration status is shown. Secret values stay on the server.</p><button onClick={() => setConfigurationRefresh(value => value + 1)} className="btn-ghost text-xs">Refresh status</button></div><div className="surface mt-4 p-5"><h3 className="font-semibold">Environment variables</h3><p className="mt-2 text-sm leading-6 text-zinc-500">Add the values from <code className="text-red-300">.env.example</code> to your Vercel project settings. Keep service-role keys, OAuth secrets, AI keys, and the site password server-side only.</p><button onClick={()=>navigator.clipboard?.writeText("SITE_PASSWORD=\nAUTH_SECRET=\nSUPABASE_URL=\nSUPABASE_ANON_KEY=\nSUPABASE_SERVICE_ROLE_KEY=\nGITHUB_CLIENT_ID=\nGITHUB_CLIENT_SECRET=\nAI_API_KEY=\nAI_API_URL=\nAI_MODEL=")} className="btn-ghost mt-4">Copy variable names</button></div></Module>}
         </div>
       </main>
