@@ -4,7 +4,7 @@ async function valid(token?: string) {
   const secret = process.env.AUTH_SECRET;
   if (!token || !secret || secret.length < 32) return false;
   const [expires, supplied] = token.split(".");
-  if (!expires || !supplied || !/^\\d+$/.test(expires) || Number(expires) < Date.now()) return false;
+  if (!expires || !supplied || !/^\d+$/.test(expires) || Number(expires) < Date.now()) return false;
   try {
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     const signature = Uint8Array.from(supplied.match(/.{1,2}/g) ?? [], byte => parseInt(byte, 16));
