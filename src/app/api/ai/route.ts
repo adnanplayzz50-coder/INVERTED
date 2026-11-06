@@ -17,6 +17,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ result: data.choices?.[0]?.message?.content ?? "", usage: data.usage ?? null, provider });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI request failed.";
-    return NextResponse.json({ error: message }, { status: /All configured AI providers failed|Configure the primary provider|AI_PROVIDER/.test(message) ? 503 : 500 });
+    return NextResponse.json({ error: message }, { status: /All configured AI providers failed|Configure GROQ_API_KEY|AI_PROVIDER/.test(message) ? 503 : 500 });
   }
 }
