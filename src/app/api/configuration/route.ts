@@ -51,10 +51,17 @@ export async function GET() {
     try {
       const { data, error } = await getSupabaseAdmin().storage.getBucket("inverted-media");
       if (error || !data) {
+        const detail = error?.message || "Supabase returned no bucket data.";
+        const code = error && "statusCode" in error ? String(error.statusCode) : "";
+        const hint = /not found|does not exist|404/i.test(detail)
+          ? "The configured Supabase project does not contain this bucket. Confirm SUPABASE_URL points to the project shown in your Supabase dashboard."
+          : /permission|unauthorized|jwt|invalid.*key|service.role|403|401/i.test(detail + " " + code)
+            ? "The configured key may not be the service-role/secret key for this same Supabase project. Replace SUPABASE_SERVICE_ROLE_KEY with the server-side key from Project Settings → API."
+            : "Confirm the project URL and service-role key belong to the same Supabase project.";
         supabase = {
           status: "incomplete",
-          message: "Supabase credentials were found, but the private storage bucket 'inverted-media' could not be verified. Create the bucket or check the service-role key.",
-          missing: ["Supabase bucket: inverted-media"]
+          message: "Could not verify 'inverted-media'. " + detail + (code ? " (HTTP " + code + "). " : " ") + hint,
+          missing: ["Supabase bucket verification"]
         };
       } else {
         supabase = { status: "configured", message: "Supabase credentials are working and the inverted-media bucket exists." };
