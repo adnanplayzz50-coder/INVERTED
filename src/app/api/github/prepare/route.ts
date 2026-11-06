@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decryptGitHubToken, githubCookieName } from "@/lib/github-token";
+import { requestAI } from "@/lib/ai-provider";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 async function gh(token: string, path: string) {
@@ -47,28 +48,12 @@ export async function POST(request: NextRequest) {
         contextFiles.push({ path, content }); total += content.length;
       } catch {}
     }
-    const key = process.env.AI_API_KEY, endpoint = process.env.AI_API_URL, model = process.env.AI_MODEL;
-    if (!key || !endpoint || !model) return NextResponse.json({ error: "Set AI_API_KEY, AI_API_URL and AI_MODEL in Vercel." }, { status: 503 });
     const system = "You are INVERTED, an expert software engineer editing a real GitHub repository. Return ONLY valid JSON: {\"summary\":\"...\",\"changes\":[{\"path\":\"relative/path\",\"content\":\"COMPLETE final file contents\",\"reason\":\"...\"}]}. Produce complete file contents, never patches or placeholders. Use uploaded files as source material and obey requested destination paths. For edits, preserve existing behavior and integrate changes. Only include files that should change. No markdown fences. Paths must be relative, must not start with slash, contain .. or target .git. If upload destination is unspecified, use its filename at repository root and mention that.";
     const payload = { repository: repo, branch, repositoryFilePaths: paths.slice(0, 500), existingFileContents: contextFiles, uploadedFiles: files, instruction: instruction.trim() };
-    const configuredUrl = endpoint.trim().replace(/\/+$/, "");
-    const parsedUrl = new URL(configuredUrl);
-    if (parsedUrl.hostname !== "generativelanguage.googleapis.com" || parsedUrl.protocol !== "https:") {
-      return NextResponse.json({ error: "For Gemini, AI_API_URL must use https://generativelanguage.googleapis.com. Current host: " + parsedUrl.hostname }, { status: 400 });
-    }
-    const apiPath = parsedUrl.pathname.replace(/\/+$/, "");
-    const aiEndpoint = apiPath.endsWith("/v1beta/openai/chat/completions")
-      ? parsedUrl.origin + apiPath
-      : apiPath.endsWith("/v1beta/openai")
-        ? parsedUrl.origin + apiPath + "/chat/completions"
-        : apiPath.endsWith("/v1beta")
-          ? parsedUrl.origin + apiPath + "/openai/chat/completions"
-          : parsedUrl.origin + "/v1beta/openai/chat/completions";
-    const response = await fetch(aiEndpoint, { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({ model, temperature: 0.15, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(payload) }] }), cache: "no-store" });
-    const rawBody = await response.text();
-    let result: any = {};
-    try { result = rawBody ? JSON.parse(rawBody) : {}; } catch { result = {}; }
-    if (!response.ok) return NextResponse.json({ error: "Gemini returned HTTP " + response.status + " from " + new URL(aiEndpoint).host + ": " + (result.error?.message || result.message || rawBody.slice(0, 500) || "No error details returned.") + (response.status === 404 ? " Check AI_API_URL and AI_MODEL in Vercel." : "") }, { status: 502 });
+    const { data: result, provider } = await requestAI(
+      [{ role: "system", content: system }, { role: "user", content: JSON.stringify(payload) }],
+      { temperature: 0.15, responseFormat: { type: "json_object" } }
+    );
     const raw = result.choices?.[0]?.message?.content;
     if (typeof raw !== "string") return NextResponse.json({ error: "AI returned an unexpected response. Check AI_API_URL and AI_MODEL." }, { status: 502 });
     const parsed = JSON.parse(raw);
@@ -81,8 +66,9 @@ export async function POST(request: NextRequest) {
       seen.add(path);
       return { path, content: x.content, reason: String(x.reason || "Updated by AI"), action: paths.includes(path) ? "edit" : "create" };
     });
-    return NextResponse.json({ summary: String(parsed.summary || "Prepared changes."), changes, baseSha, repo, branch, defaultBranch: repository.default_branch }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ summary: String(parsed.summary || "Prepared changes."), changes, baseSha, repo, branch, defaultBranch: repository.default_branch, provider }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not prepare changes." }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Could not prepare changes.";
+    return NextResponse.json({ error: message }, { status: /All configured AI providers failed|Configure the primary provider|AI_PROVIDER/.test(message) ? 503 : 500 });
   }
 }
