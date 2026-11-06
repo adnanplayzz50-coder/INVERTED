@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { LockKeyhole, ShieldCheck, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
@@ -10,15 +10,13 @@ export default function LoginPage() {
   const [error,setError] = useState("");
   const [busy,setBusy] = useState(false);
   const router = useRouter();
-  const params = useSearchParams();
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
     try {
       const response = await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to sign in.");
-      const next = params.get("next");
-      router.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
+      router.replace("/");
       router.refresh();
     } catch(e) { setError(e instanceof Error ? e.message : "Something went wrong."); }
     finally { setBusy(false); }
