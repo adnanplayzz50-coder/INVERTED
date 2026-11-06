@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       { temperature: 0.15, responseFormat: { type: "json_object" } }
     );
     const raw = result.choices?.[0]?.message?.content;
-    if (typeof raw !== "string") return NextResponse.json({ error: "AI returned an unexpected response. Check AI_API_URL and AI_MODEL." }, { status: 502 });
+    if (typeof raw !== "string") return NextResponse.json({ error: "AI returned an unexpected response from " + provider + "." }, { status: 502 });
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed.changes) || !parsed.changes.length || parsed.changes.length > 20) return NextResponse.json({ error: "AI did not return file changes. Be more specific about the destination paths." }, { status: 422 });
     const seen = new Set<string>();
@@ -69,6 +69,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ summary: String(parsed.summary || "Prepared changes."), changes, baseSha, repo, branch, defaultBranch: repository.default_branch, provider }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not prepare changes.";
-    return NextResponse.json({ error: message }, { status: /All configured AI providers failed|Configure the primary provider|AI_PROVIDER/.test(message) ? 503 : 500 });
+    return NextResponse.json({ error: message }, { status: /All configured AI providers failed|Configure GROQ_API_KEY|AI_PROVIDER/.test(message) ? 503 : 500 });
   }
 }
